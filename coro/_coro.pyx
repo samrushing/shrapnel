@@ -159,6 +159,10 @@ class Exit (Exception):
     "exception used to exit the event loop"
     pass
 
+class YieldFromMain (Exception):
+    "attempt to yield from main"
+    pass
+
 class ScheduleError (Exception):
     "attempt to schedule an already-scheduled coroutine"
     pass
@@ -199,7 +203,8 @@ cdef extern int SHRAP_STACK_PAD
 # forward
 cdef public class sched  [ object sched_object, type sched_type ]
 cdef public class queue_poller [ object queue_poller_object, type queue_poller_type ]
-cdef sched the_scheduler "the_scheduler"
+cdef sched the_scheduler "_the_scheduler"
+cdef main_stub the_main_coro "the_main_coro"
 cdef queue_poller the_poller "the_poller"
 
 cdef int default_selfishness
@@ -339,7 +344,7 @@ cdef public class coro [ object _coro_object, type _coro_type ]:
         # save exception data
         self.save_exception_data()
         if not self.dead:
-            the_scheduler._current = None
+            the_scheduler._current = the_main_coro
             the_scheduler._last = self
         else:
             # Beware.  When this coroutine is 'dead', it's about to __swap()
@@ -713,6 +718,16 @@ cdef public class coro [ object _coro_object, type _coro_type ]:
 
         self.waiting_joiners.wait()
 
+cdef class main_stub (coro):
+    """This class serves only one purpose - to catch attempts at yielding() from main,
+    which almost certainly means someone forgot to run inside the event loop."""
+
+    def __init__ (self):
+        self.name = 'main/scheduler'
+
+    cdef __yield (self):
+        raise YieldFromMain ("is the event loop running?")
+
 def get_live_coros():
     """Get the number of live coroutines.
 
@@ -905,7 +920,8 @@ cdef public class sched [ object sched_object, type sched_type ]:
     # this is the stack that all coroutines run on
     cdef void * stack_base
     cdef int stack_size
-    cdef public object _current, pending, staging
+    cdef public coro _current
+    cdef public object pending, staging
     cdef coro _last
     cdef int profiling
     cdef uint64_t latency_threshold
@@ -921,7 +937,7 @@ cdef public class sched [ object sched_object, type sched_type ]:
         #    <int>self.stack_base,
         #    <int>self.stack_base + stack_size
         #    ))
-        self._current = None
+        self._current = the_main_coro
         self._last = None
         self.pending = []
         self.staging = []
@@ -1098,9 +1114,6 @@ cdef public class sched [ object sched_object, type sched_type ]:
         """
         cdef timebomb tb
         cdef event e
-        IF CORO_DEBUG:
-            # can't call with_timeout() from main...
-            assert self._current is not None
 
         # Negative timeout is treated the same as 0.
         if delta < 0:
@@ -1345,6 +1358,8 @@ IF COMPILE_LIO:
 # python.  'global' doesn't do the trick.  However, defining global
 # functions to access them works...
 
+# singletons
+the_main_coro = main_stub()
 the_scheduler = sched()
 the_poller = queue_poller()
 _the_scheduler = the_scheduler
@@ -1455,7 +1470,7 @@ cdef void info(int sig):
 
     co = the_scheduler._current
     frame = _PyThreadState_Current.frame
-    if co:
+    if co is not the_main_coro:
         libc.fprintf(libc.stderr, 'coro %i "%s" at %s: %s %i\n',
             co.id,
             PyString_AsString (co.name),
