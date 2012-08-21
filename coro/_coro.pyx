@@ -516,8 +516,9 @@ cdef public class coro [ object _coro_object, type _coro_type ]:
         del _all_threads[self.id]
         self.fun = None
         self.args = None
-        if self.waiting_joiners is not None:
-            self.waiting_joiners.wake_all()
+        if self._on_exit_thunks is not None:
+            for thunk in self._on_exit_thunks:
+                thunk()
 
     cdef __interrupt (self, the_exception):
         """Schedule the coro to resume with an exception.
@@ -675,14 +676,16 @@ cdef public class coro [ object _coro_object, type _coro_type ]:
         """
         if the_scheduler._current is self:
             raise AssertionError('Cannot join with self.')
-
         if self.dead:
             return
+        cv = condition_variable()
+        self.add_on_exit_thunk (cv.wake_all)
+        cv.wait()
 
-        if self.waiting_joiners is None:
-            self.waiting_joiners = condition_variable()
-
-        self.waiting_joiners.wait()
+    cpdef add_on_exit_thunk (self, object thunk):
+        if self._on_exit_thunks is None:
+            self._on_exit_thunks = []
+        self._on_exit_thunks.append (thunk)
 
 def get_live_coros():
     """Get the number of live coroutines.

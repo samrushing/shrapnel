@@ -86,7 +86,8 @@ cdef public class coro [ object _coro_object, type _coro_type ]:
 
     cdef machine_state state
     cdef object fun
-    cdef object args, kwargs
+    cdef tuple args
+    cdef dict kwargs
     cdef readonly bytes name
     cdef public int id
     # XXX think about doing these as a bitfield/property
@@ -102,9 +103,9 @@ cdef public class coro [ object _coro_object, type _coro_type ]:
     cdef int saved_recursion_depth
     cdef int selfish_acts, max_selfish_acts
     cdef bint compress, compressed
-    cdef object waiting_joiners
     # Used for thread-local-storage.
     cdef dict _tdict
+    cdef list _on_exit_thunks
     cdef __create (self)
     cdef __destroy (self)
     cdef __yield (self)
@@ -116,6 +117,7 @@ cdef public class coro [ object _coro_object, type _coro_type ]:
     cdef _die (self)
     cdef __interrupt (self, the_exception)
     cdef int try_selfish (self)
+    cpdef add_on_exit_thunk (self, object thunk)
 
 # choose a library for stack compression
 IF COMPILE_LZ4:
