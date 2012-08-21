@@ -199,9 +199,7 @@ class websocket:
         try:
             while 1:
                 try:
-                    close_it = coro.with_timeout (30, self.read_packet_hixie_76)
-                except coro.TimeoutError:
-                    self.send_pong ('bleep')
+                    close_it = self.read_packet_hixie_76()
                 except coro.ClosedError:
                     break
                 if close_it:
